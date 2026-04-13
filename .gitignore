@@ -1,0 +1,38 @@
+# Terraform state & local files
+terraform.tfstate
+terraform.tfstate.backup
+.terraform/
+.terraform.lock.hcl
+*.tfvars
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+.pytest_cache/
+
+# Environment variables
+.env
+.env.*
+
+# Project specification (local context file)
+contexto.md
+
+# GCP credentials (NEVER commit these)
+*.json
+
+# Sample audio files (generated locally)
+sample_audios/*.wav
+sample_audios/*.mp3
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
