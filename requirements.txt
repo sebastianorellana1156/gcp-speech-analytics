@@ -10,7 +10,7 @@ google-cloud-aiplatform==1.52.0
 google-cloud-texttospeech==2.16.3
 
 # Vertex AI / Gemini
-vertexai==1.52.0
+vertexai
 
 # Utilities
 python-dotenv==1.0.1
