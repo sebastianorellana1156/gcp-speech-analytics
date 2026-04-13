@@ -145,6 +145,9 @@ cd ..
 
 ### 5. Ejecutar Localmente
 
+> [!TIP]
+> La aplicación web lee automáticamente los archivos `.wav` disponibles en tu bucket GCS.
+
 ```bash
 export GCP_PROJECT_ID=gcp-speech-analytics
 export GCS_BUCKET_NAME=speech-analytics-gcp-speech-analytics
@@ -209,7 +212,7 @@ gcloud run deploy speech-analytics-app \
 │   ├── main.tf          # GCS, BQ, Artifact Registry, SA, IAM, Cloud Run
 │   └── variables.tf     # Variables con defaults
 ├── src/
-│   ├── app.py           # Interfaz Streamlit (4 bloques de UI)
+│   ├── app.py           # Interfaz Streamlit (lee audios dinámicamente desde GCS)
 │   ├── gcp_services.py  # Upload GCS, STT v2, DLP, Gemini
 │   ├── bq_client.py     # Insert y truncate BigQuery
 │   └── Dockerfile       # Imagen python:3.10-slim
@@ -235,6 +238,7 @@ gcloud run deploy speech-analytics-app \
 8. feat(gcp_services): add Vertex AI insight extraction with Gemini
 9. feat(app): build Streamlit UI with session state and progress tracking
 10. docs: complete README with architecture and deployment guide
+11. feat(app): read audios dynamically from GCS and update TTS to es-US Neural2
 ```
 
 ---

@@ -15,7 +15,7 @@ import time
 
 import streamlit as st
 
-from gcp_services import upload_audio_to_gcs, transcribe_audio, redact_pii, extract_insights
+from gcp_services import upload_audio_to_gcs, transcribe_audio, redact_pii, extract_insights, list_audios_from_gcs, get_audio_bytes_from_gcs
 from bq_client import insert_call_record, truncate_table
 
 # ---------------------------------------------------------------------------
@@ -39,13 +39,11 @@ GEMINI_MODEL    = os.getenv("GEMINI_MODEL",    "gemini-1.5-flash")
 
 AUDIO_DIR = os.path.join(os.path.dirname(__file__), "sample_audios")
 
-AUDIO_OPTIONS = [
-    "Llamada_01_ReclamoFraude",
-    "Llamada_02_ConsultaSaldo",
-    "Llamada_03_SolicitudPrestamo",
-    "Llamada_04_BloqueoTarjeta",
-    "Llamada_05_CancelacionCuenta",
-]
+try:
+    AUDIO_OPTIONS = list_audios_from_gcs(GCS_BUCKET_NAME)
+except Exception as e:
+    st.error(f"Error listando audios: {e}")
+    AUDIO_OPTIONS = []
 
 # ---------------------------------------------------------------------------
 # Inicialización del session_state
@@ -210,21 +208,22 @@ with col_sel:
     selected_audio = st.selectbox(
         "Escenario de llamada bancaria:",
         options=AUDIO_OPTIONS,
-        format_func=lambda x: x.replace("_", " ").replace("Llamada", "📞 Llamada"),
+        format_func=lambda x: x.replace(".wav", "").replace("_", " ").replace("Llamada", "📞 Llamada"),
     )
 
-audio_path = os.path.join(AUDIO_DIR, f"{selected_audio}.wav")
-
 with col_info:
-    if os.path.exists(audio_path):
-        size_kb = os.path.getsize(audio_path) / 1024
-        st.metric("Archivo", f"{selected_audio}.wav")
-        st.caption(f"📂 Tamaño: {size_kb:.1f} KB")
+    if selected_audio:
+        st.metric("GCS Bucket", GCS_BUCKET_NAME)
+        st.caption(f"📂 Archivo: {selected_audio}")
     else:
-        st.warning("⚠️ Audio no generado aún. Ejecuta `generate_sample_audios.py` primero.")
+        st.warning("⚠️ No hay audios en el bucket.")
 
-if os.path.exists(audio_path):
-    st.audio(audio_path, format="audio/wav")
+if selected_audio:
+    try:
+        audio_bytes = get_audio_bytes_from_gcs(GCS_BUCKET_NAME, selected_audio)
+        st.audio(audio_bytes, format="audio/wav")
+    except Exception as e:
+        st.error(f"Error cargando audio desde GCS: {e}")
 
 st.markdown("</div>", unsafe_allow_html=True)
 
@@ -241,8 +240,8 @@ with col_btn:
 # BLOQUE 2 — Teatro del Backend (solo si se presionó el botón)
 # ===========================================================================
 if process_clicked:
-    if not os.path.exists(audio_path):
-        st.error("❌ No se encontró el archivo de audio. Genera los audios de muestra primero.")
+    if not selected_audio:
+        st.error("❌ No se ha seleccionado ningún audio del bucket.")
         st.stop()
 
     st.session_state.processed = False
@@ -251,10 +250,10 @@ if process_clicked:
 
     with st.status("🔄 Procesando llamada en GCP...", expanded=True) as status:
         try:
-            # ── Paso 1: Upload a GCS ──────────────────────────────────────
-            st.write("⏳ Subiendo audio a Cloud Storage...")
-            gcs_uri = upload_audio_to_gcs(audio_path, GCS_BUCKET_NAME)
-            st.write("✅ Audio subido a Cloud Storage.")
+            # ── Paso 1: Ubicar audio en GCS ──────────────────────────────────────
+            st.write("⏳ Obteniendo referencia del audio en Cloud Storage...")
+            gcs_uri = f"gs://{GCS_BUCKET_NAME}/{selected_audio}"
+            st.write(f"✅ Usando audio desde: {gcs_uri}")
 
             # ── Paso 2: Transcripción STT v2 ──────────────────────────────
             st.write("⏳ Transcribiendo audio (Cloud Speech-to-Text)...")
@@ -283,7 +282,7 @@ if process_clicked:
             processing_duration = round(time.time() - pipeline_start, 2)
 
             record = {
-                "audio_filename":               f"{selected_audio}.wav",
+                "audio_filename":               selected_audio,
                 "transcript_redacted":          redacted_text,
                 "call_intent":                  insights.get("call_intent"),
                 "customer_sentiment":           insights.get("customer_sentiment"),
@@ -303,7 +302,7 @@ if process_clicked:
             st.session_state.processed           = True
             st.session_state.transcript_segments = segments
             st.session_state.insights            = insights
-            st.session_state.audio_filename      = f"{selected_audio}.wav"
+            st.session_state.audio_filename      = selected_audio
             st.session_state.pipeline_metrics    = {
                 "speech_confidence_score":      confidence_score,
                 "dlp_findings_count":           findings_count,

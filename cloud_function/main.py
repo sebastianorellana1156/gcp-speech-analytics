@@ -9,13 +9,13 @@ from google.cloud import storage
 
 # Configuración de voces
 VOICE_AGENTE = texttospeech.VoiceSelectionParams(
-    language_code="es-CL",
-    name="es-US-Neural2-B",
+    language_code="es-US",
+    name="es-US-Neural2-B",  # Voz masculina de alta calidad
     ssml_gender=texttospeech.SsmlVoiceGender.MALE,
 )
 VOICE_CLIENTE = texttospeech.VoiceSelectionParams(
-    language_code="es-CL",
-    name="es-US-Neural2-A",
+    language_code="es-US",
+    name="es-US-Neural2-A",  # Voz femenina de alta calidad
     ssml_gender=texttospeech.SsmlVoiceGender.FEMALE,
 )
 AUDIO_CONFIG = texttospeech.AudioConfig(

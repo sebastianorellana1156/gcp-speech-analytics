@@ -56,6 +56,32 @@ def upload_audio_to_gcs(local_path: str, bucket_name: str) -> str:
         raise RuntimeError(f"Error subiendo audio a GCS ({bucket_name}): {e}") from e
 
 
+def list_audios_from_gcs(bucket_name: str) -> list[str]:
+    """
+    Lista todos los audios (.wav) disponibles en el bucket de GCS.
+    """
+    try:
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(bucket_name)
+        blobs = bucket.list_blobs()
+        return [blob.name for blob in blobs if blob.name.endswith('.wav')]
+    except Exception as e:
+        raise RuntimeError(f"Error listando audios desde GCS ({bucket_name}): {e}") from e
+
+
+def get_audio_bytes_from_gcs(bucket_name: str, blob_name: str) -> bytes:
+    """
+    Descarga el audio como bytes para reproducirlo en memoria.
+    """
+    try:
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(bucket_name)
+        blob = bucket.blob(blob_name)
+        return blob.download_as_bytes()
+    except Exception as e:
+        raise RuntimeError(f"Error descargando audio de GCS ({bucket_name}/{blob_name}): {e}") from e
+
+
 # ---------------------------------------------------------------------------
 # 2. Transcripción con Speech-to-Text v2
 # ---------------------------------------------------------------------------
