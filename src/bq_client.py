@@ -110,3 +110,20 @@ def truncate_table(project_id: str, dataset_id: str, table_id: str) -> str:
         return f"✅ Tabla {table_id} vaciada correctamente."
     except Exception as e:
         raise RuntimeError(f"Error truncando tabla {table_id}: {e}") from e
+
+def get_top_records(project_id: str, dataset_id: str, table_id: str, limit: int = 10) -> list[dict]:
+    """
+    Obtiene los registros más recientes de BigQuery.
+    """
+    client = bigquery.Client(project=project_id)
+    query = f"""
+        SELECT *
+        FROM `{project_id}.{dataset_id}.{table_id}`
+        ORDER BY timestamp DESC
+        LIMIT {limit}
+    """
+    try:
+        query_job = client.query(query)
+        return [dict(row) for row in query_job.result()]
+    except Exception as e:
+        raise RuntimeError(f"Error obteniendo registros: {e}") from e
