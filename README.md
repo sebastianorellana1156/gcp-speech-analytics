@@ -89,7 +89,9 @@ gcloud services enable \
   run.googleapis.com \
   artifactregistry.googleapis.com \
   iam.googleapis.com \
-  texttospeech.googleapis.com
+  texttospeech.googleapis.com \
+  cloudfunctions.googleapis.com \
+  cloudbuild.googleapis.com
 ```
 
 ---
@@ -109,7 +111,8 @@ gcloud config set project gcp-speech-analytics
 gcloud services enable \
   speech.googleapis.com dlp.googleapis.com aiplatform.googleapis.com \
   bigquery.googleapis.com storage.googleapis.com run.googleapis.com \
-  artifactregistry.googleapis.com iam.googleapis.com texttospeech.googleapis.com
+  artifactregistry.googleapis.com iam.googleapis.com texttospeech.googleapis.com \
+  cloudfunctions.googleapis.com cloudbuild.googleapis.com
 ```
 
 ### 3. Infraestructura con Terraform
