@@ -297,6 +297,63 @@ resource "google_cloud_run_v2_service_iam_member" "allow_unauthenticated" {
 }
 
 # ============================================================
+# Cloud Function — Generación de Audios
+# ============================================================
+resource "google_storage_bucket" "function_source_bucket" {
+  name                        = "speech-analytics-cf-source-${var.project_id}"
+  location                    = var.region
+  force_destroy               = true
+  uniform_bucket_level_access = true
+}
+
+data "archive_file" "function_zip" {
+  type        = "zip"
+  source_dir  = "${path.module}/../cloud_function"
+  output_path = "${path.module}/cloud_function.zip"
+}
+
+resource "google_storage_bucket_object" "function_zip" {
+  name   = "cloud_function_${data.archive_file.function_zip.output_md5}.zip"
+  bucket = google_storage_bucket.function_source_bucket.name
+  source = data.archive_file.function_zip.output_path
+}
+
+resource "google_cloudfunctions2_function" "generate_audios" {
+  name        = "generate-audios"
+  location    = var.region
+  description = "Generates sample audios and drops them in GCS"
+  
+  build_config {
+    runtime     = "python310"
+    entry_point = "generate_audios_http"
+    source {
+      storage_source {
+        bucket = google_storage_bucket.function_source_bucket.name
+        object = google_storage_bucket_object.function_zip.name
+      }
+    }
+  }
+
+  service_config {
+    max_instance_count = 1
+    available_memory   = "256M"
+    timeout_seconds    = 120
+    environment_variables = {
+      GCS_BUCKET_NAME = google_storage_bucket.audio_bucket.name
+    }
+    service_account_email = google_service_account.app_sa.email
+  }
+}
+
+resource "google_cloud_run_service_iam_member" "function_invoker" {
+  project  = google_cloudfunctions2_function.generate_audios.project
+  location = google_cloudfunctions2_function.generate_audios.location
+  service  = google_cloudfunctions2_function.generate_audios.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
+
+# ============================================================
 # Outputs útiles
 # ============================================================
 output "cloud_run_url" {
@@ -317,4 +374,9 @@ output "artifact_registry_url" {
 output "service_account_email" {
   description = "Email de la Service Account de la aplicación"
   value       = google_service_account.app_sa.email
+}
+
+output "cloud_function_url" {
+  description = "URL pública de la Cloud Function generadora de audios"
+  value       = google_cloudfunctions2_function.generate_audios.service_config[0].uri
 }
