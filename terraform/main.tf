@@ -141,7 +141,7 @@ resource "google_bigquery_table" "call_transcriptions" {
       name        = "gemini_model_used"
       type        = "STRING"
       mode        = "NULLABLE"
-      description = "Nombre exacto del modelo Gemini utilizado (ej: gemini-1.5-flash)"
+      description = "Nombre exacto del modelo Gemini utilizado (ej: gemini-2.5-flash)"
     },
     {
       name        = "pipeline_status"
@@ -261,7 +261,7 @@ resource "google_cloud_run_v2_service" "app" {
       }
       env {
         name  = "GEMINI_MODEL"
-        value = "gemini-1.5-flash"
+        value = "gemini-2.5-flash"
       }
 
       resources {

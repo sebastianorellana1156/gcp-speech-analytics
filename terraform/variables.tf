@@ -13,7 +13,7 @@ variable "region" {
 variable "gcs_bucket_name" {
   description = "GCS bucket name for audio uploads (must be globally unique)"
   type        = string
-  default     = "speech-analytics-gcp-speech-analytics"
+  # No default — must be provided explicitly (bucket names are globally unique and env-specific)
 }
 
 variable "bq_dataset_id" {
