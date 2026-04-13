@@ -5,7 +5,7 @@ Orquesta el pipeline completo de procesamiento de llamadas bancarias:
   1. Selector de audio + reproductor
   2. Teatro del backend (progreso visual paso a paso)
   3. Panel de resultados (transcripción + insights)
-  4. Botón de reseteo de base de datos
+  4. Botón de reseteo de base de datos .
 
 Los resultados persisten en st.session_state hasta el reseteo explícito.
 """
@@ -16,7 +16,7 @@ import time
 import streamlit as st
 
 from gcp_services import upload_audio_to_gcs, transcribe_audio, redact_pii, extract_insights, list_audios_from_gcs, get_audio_bytes_from_gcs
-from bq_client import insert_call_record, truncate_table
+from bq_client import insert_call_record, get_top_records
 
 # ---------------------------------------------------------------------------
 # Configuración de la página
@@ -31,16 +31,20 @@ st.set_page_config(
 # ---------------------------------------------------------------------------
 # Variables de entorno
 # ---------------------------------------------------------------------------
-GCP_PROJECT_ID  = os.getenv("GCP_PROJECT_ID", "gcp-speech-analytics")
-GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME", "speech-analytics-gcp-speech-analytics")
+GCP_PROJECT_ID  = os.getenv("GCP_PROJECT_ID")
+GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME")
 BQ_DATASET_ID   = os.getenv("BQ_DATASET_ID",   "call_analytics_dataset")
 BQ_TABLE_ID     = os.getenv("BQ_TABLE_ID",     "call_transcriptions")
-GEMINI_MODEL    = os.getenv("GEMINI_MODEL",    "gemini-1.5-flash")
+GEMINI_MODEL    = os.getenv("GEMINI_MODEL",    "gemini-2.5-flash")
 
 AUDIO_DIR = os.path.join(os.path.dirname(__file__), "sample_audios")
 
+@st.cache_data(ttl=300)
+def cached_list_audios(bucket_name):
+    return list_audios_from_gcs(bucket_name)
+
 try:
-    AUDIO_OPTIONS = list_audios_from_gcs(GCS_BUCKET_NAME)
+    AUDIO_OPTIONS = cached_list_audios(GCS_BUCKET_NAME)
 except Exception as e:
     st.error(f"Error listando audios: {e}")
     AUDIO_OPTIONS = []
@@ -188,14 +192,29 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
-# Header
+# Header e Introducción
 # ---------------------------------------------------------------------------
 st.markdown("""
-<div class="main-header">
+<div class="main-header" style="margin-bottom: 0.5rem;">
     <h1>🎙️ Speech Analytics — Banca GCP</h1>
-    <p>Pipeline de IA para análisis de llamadas bancarias · Cloud Speech-to-Text v2 · DLP · Vertex AI · BigQuery</p>
+    <p style="font-size: 1.05rem; color: #a5b4fc;">Pipeline <i>Serverless</i> de Inteligencia Artificial para el análisis automatizado de llamadas bancarias.</p>
 </div>
 """, unsafe_allow_html=True)
+
+with st.container(border=True):
+    st.markdown("""
+    ### 📖 Acerca de este Proyecto
+    Este MVP demuestra una arquitectura completa en **Google Cloud Platform** enfocada en potenciar auditorías de call centers, asegurando la privacidad de los clientes y entregando métricas de negocio accionables, todo en tiempo real.
+    
+    ### ⚙️ Flujo y Arquitectura End-to-End
+    1. **☁️ Cloud Storage**: Repositorio seguro donde aterrizan las llamadas teléfonicas entrantes (`.wav`).
+    2. **🗣️ Speech-to-Text V1**: Transcribe el audio con alta precisión y separa los locutores (Diarización: Cliente vs Agente).
+    3. **🔒 Cloud DLP**: Detecta y enmascara automáticamente Información Sensible o PII (RUTs, tarjetas de crédito, correos electrónicos).
+    4. **🧠 Vertex AI (Gemini 2.5 Flash)**: Ingiere el texto ya anonimizado y estructura KPIs (Intención, Sentimiento, Churn, Resumen).
+    5. **🗄️ BigQuery**: Almacena de forma estructurada el payload final y las métricas de rendimiento para su explotación vía herramientas de inteligencia de negocios (BI).
+    """)
+
+st.markdown("<br>", unsafe_allow_html=True)
 
 # ===========================================================================
 # BLOQUE 1 — Selector de audio y reproductor
@@ -264,12 +283,26 @@ if process_clicked:
 
             # ── Paso 3: Redacción PII con DLP ─────────────────────────────
             st.write("⏳ Enmascarando datos sensibles (Cloud DLP)...")
-            full_transcript = " ".join(
+            # Unir con saltos de línea para poder reconstruir los segmentos visuales
+            full_transcript = "\\n".join(
                 f"[{seg['speaker']}]: {seg['text']}" for seg in segments
             )
             dlp_result       = redact_pii(full_transcript, GCP_PROJECT_ID)
             redacted_text    = dlp_result["redacted_text"]
             findings_count   = dlp_result["findings_count"]
+            findings_details = dlp_result.get("findings_details", [])
+            
+            # Reconstruir los segmentos para la UI a partir del texto censurado
+            redacted_segments = []
+            for line in redacted_text.split("\\n"):
+                if line.startswith("[Agente]:"):
+                    redacted_segments.append({"speaker": "Agente", "text": line.replace("[Agente]:", "").strip()})
+                elif line.startswith("[Cliente]:"):
+                    redacted_segments.append({"speaker": "Cliente", "text": line.replace("[Cliente]:", "").strip()})
+                else:
+                    if redacted_segments:
+                        redacted_segments[-1]["text"] += " " + line
+
             st.write(f"✅ {findings_count} hallazgos PII enmascarados.")
 
             # ── Paso 4: Gemini insights ───────────────────────────────────
@@ -296,11 +329,17 @@ if process_clicked:
             }
             insert_call_record(record, GCP_PROJECT_ID, BQ_DATASET_ID, BQ_TABLE_ID)
             st.write("✅ ¡Datos guardados en BigQuery!")
+            
+            # Limpiar caché de BigQuery para que la tabla de abajo se actualice inmediatamente
+            if "cached_get_top_records" in globals():
+                cached_get_top_records.clear()
+
             st.write(f"⏱️ Tiempo total de procesamiento: {processing_duration:.2f} segundos")
 
             # Guardar en session_state
             st.session_state.processed           = True
-            st.session_state.transcript_segments = segments
+            st.session_state.transcript_segments = redacted_segments
+            st.session_state.findings_details    = findings_details
             st.session_state.insights            = insights
             st.session_state.audio_filename      = selected_audio
             st.session_state.pipeline_metrics    = {
@@ -354,11 +393,11 @@ if st.session_state.processed:
 
     # ── Columna izquierda: Transcripción ─────────────────────────────────
     with col_transcript:
-        st.markdown("### 💬 Transcripción (PII enmascarada)")
+        st.markdown("### 💬 Transcripción")
         transcript_container = st.container(height=480)
 
         PII_TOKENS = [
-            "[CHILE_RUT_CENSURADO]",
+            "[RUT_CENSURADO]",
             "[TARJETA_CENSURADA]",
             "[EMAIL_CENSURADO]",
             "[TELEFONO_CENSURADO]",
@@ -435,6 +474,28 @@ if st.session_state.processed:
         </div>
         """, unsafe_allow_html=True)
 
+        # Hallazgos PII (Lo censurado)
+        findings_count = metrics.get("dlp_findings_count", 0)
+        findings_details = st.session_state.get("findings_details", [])
+        
+        if findings_details:
+            badges_html = ""
+            for detail in findings_details:
+                itype = detail["info_type"].replace("CHILE_CDI_NUMBER", "RUT").replace("CHILE_RUT_CUSTOM", "RUT").replace("CREDIT_CARD_NUMBER", "TARJETA").replace("EMAIL_ADDRESS", "EMAIL").replace("PHONE_NUMBER", "TELÉFONO")
+                quote = detail["quote"]
+                badges_html += f"<div style='margin-bottom: 3px;'><span class='pii-badge'>{itype}</span> <span style='font-family: monospace; color: #f87171;'>{quote}</span></div>"
+            
+            pii_content = f"<div style='margin-bottom: 4px; font-size: 0.85rem; color: #94a3b8;'>Interceptados ({findings_count}):</div>{badges_html}"
+        else:
+            pii_content = '<span style="color: #64748b;">Ninguno</span>'
+
+        st.markdown(f"""
+        <div class="insight-card">
+            <div class="insight-label">🔒 PII Interceptada (Datos Originales)</div>
+            <div class="insight-value">{pii_content}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
         # Resumen
         st.markdown(f"""
         <div class="insight-card">
@@ -456,26 +517,40 @@ if st.session_state.processed:
         """, unsafe_allow_html=True)
 
 # ===========================================================================
-# BLOQUE 4 — Botón de reseteo
+# BLOQUE 5 — Historial de BigQuery
 # ===========================================================================
 st.markdown("---")
-st.subheader("🗑️ Resetear")
-col_reset, col_reset_space = st.columns([1, 4])
-with col_reset:
-    if st.button(
-        "🗑️ Borrar base de datos y reiniciar",
-        type="secondary",
-        use_container_width=True,
-    ):
-        with st.spinner("Eliminando registros de BigQuery..."):
-            try:
-                msg = truncate_table(GCP_PROJECT_ID, BQ_DATASET_ID, BQ_TABLE_ID)
-                # Limpiar todo el session_state
-                for key, value in DEFAULTS.items():
-                    st.session_state[key] = value
-                st.success(f"{msg} La sesión ha sido reiniciada.")
-            except Exception as e:
-                st.error(f"❌ Error al resetear: {e}")
+st.subheader("🗄️ Últimos Registros en BigQuery (Top 10)")
+
+@st.cache_data(ttl=60)
+def cached_get_top_records(project_id, dataset_id, table_id):
+    return get_top_records(project_id, dataset_id, table_id)
+
+col_table_header, col_refresh = st.columns([4, 1])
+with col_refresh:
+    if st.button("🔄 Actualizar", use_container_width=True):
+        cached_get_top_records.clear() # Fuerza a borrar la caché
+
+try:
+    records = cached_get_top_records(GCP_PROJECT_ID, BQ_DATASET_ID, BQ_TABLE_ID)
+    if records:
+        st.dataframe(
+            records,
+            use_container_width=True,
+            column_config={
+                "timestamp": st.column_config.DatetimeColumn("Fecha", format="DD/MM/YYYY HH:mm:ss"),
+                "audio_filename": "Archivo",
+                "call_intent": "Intención",
+                "customer_sentiment": "Sentimiento",
+                "churn_risk": st.column_config.CheckboxColumn("Riesgo Churn"),
+                "processing_duration_seconds": st.column_config.NumberColumn("Duración (s)", format="%.1f")
+            },
+            hide_index=True
+        )
+    else:
+        st.info("La base de datos está vacía. Procesa un audio para ver resultados.")
+except Exception as e:
+    st.warning(f"No se pudieron cargar los registros. Comienza procesando una llamada. Detalle: {e}")
 
 # ---------------------------------------------------------------------------
 # Footer
