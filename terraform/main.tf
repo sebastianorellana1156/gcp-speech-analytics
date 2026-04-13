@@ -299,12 +299,6 @@ resource "google_cloud_run_v2_service_iam_member" "allow_unauthenticated" {
 # ============================================================
 # Cloud Function — Generación de Audios
 # ============================================================
-resource "google_storage_bucket" "function_source_bucket" {
-  name                        = "speech-analytics-cf-source-${var.project_id}"
-  location                    = var.region
-  force_destroy               = true
-  uniform_bucket_level_access = true
-}
 
 data "archive_file" "function_zip" {
   type        = "zip"
@@ -313,8 +307,8 @@ data "archive_file" "function_zip" {
 }
 
 resource "google_storage_bucket_object" "function_zip" {
-  name   = "cloud_function_${data.archive_file.function_zip.output_md5}.zip"
-  bucket = google_storage_bucket.function_source_bucket.name
+  name   = "cloud_function_source_${data.archive_file.function_zip.output_md5}.zip"
+  bucket = google_storage_bucket.audio_bucket.name
   source = data.archive_file.function_zip.output_path
 }
 
@@ -328,7 +322,7 @@ resource "google_cloudfunctions2_function" "generate_audios" {
     entry_point = "generate_audios_http"
     source {
       storage_source {
-        bucket = google_storage_bucket.function_source_bucket.name
+        bucket = google_storage_bucket.audio_bucket.name
         object = google_storage_bucket_object.function_zip.name
       }
     }
