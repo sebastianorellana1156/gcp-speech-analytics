@@ -123,14 +123,31 @@ terraform apply -var="project_id=gcp-speech-analytics"
 ### 4. Generar Audios de Muestra
 
 > [!NOTE]
-> **Nota para Cloud Shell:** Si usas Cloud Shell, es posible que la API de Text-to-Speech requiera configurar un proyecto de cuota para las credenciales locales de ADC. Si obtienes un error `403`, ejecuta primero `gcloud auth application-default set-quota-project gcp-speech-analytics` o simplemente omite este paso; el despliegue Docker funcionará igual sin los audios locales.
+> **Nota para Cloud Shell:** Si usas Cloud Shell, es posible que la API de Text-to-Speech requiera configurar un proyecto de cuota para las credenciales locales de ADC. Si obtienes un error `403` al intentar `Opción A`, procede directamente con `Opción B`.
 
+**Opción A: Ejecución Local**
 ```bash
 # Requiere autenticación GCP activa
 python sample_audios/generate_sample_audios.py
 ```
-
 Los 5 archivos `.wav` quedarán en `sample_audios/`. Están excluidos del git por el `.gitignore`.
+
+**Opción B: Despliegue con Cloud Function (Recomendado)**
+Despliega la generación de audios utilizando Serverless (Gen 2) para eludir configuraciones locales e insertar los `.wav` directamente en Storage.
+```bash
+cd cloud_function
+gcloud functions deploy generate-audios \
+  --gen2 \
+  --runtime=python310 \
+  --region=us-central1 \
+  --source=. \
+  --entry-point=generate_audios_http \
+  --trigger-http \
+  --allow-unauthenticated \
+  --service-account=speech-analytics-sa@gcp-speech-analytics.iam.gserviceaccount.com \
+  --set-env-vars=GCS_BUCKET_NAME=speech-analytics-gcp-speech-analytics
+```
+Al finalizar, visita la URL pública generada para guardar instantáneamente los audios en tu Bucket de GCS. Vuelve a la carpeta principal `cd ..` para continuar.
 
 ### 5. Ejecutar Localmente
 
