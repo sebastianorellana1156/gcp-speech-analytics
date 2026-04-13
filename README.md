@@ -290,15 +290,4 @@ gcloud run deploy speech-analytics-app \
 | `Llamada_04_BloqueoTarjeta.wav` | Bloqueo urgente por robo | Negativo | ❌ No |
 | `Llamada_05_CancelacionCuenta.wav` | Cierre de cuenta por comisiones | Negativo | ✅ Sí |
 
----
 
-## 🔍 Decisiones Técnicas Clave
-
-| Decisión | Alternativa descartada | Razón |
-|---|---|---|
-| **STT V1** (`long_running_recognize`) | STT V2 con recognizer custom | V1 es más estable para diarización sin configuración de recursos regionales |
-| **Gemini 2.5 Flash** | gemini-1.5-flash | Versión estable con mejor rendimiento y menor latencia |
-| **DLP + regex propio** (`CHILE_RUT_CUSTOM`) | Solo `CHILE_CDI_NUMBER` nativo | DLP nativo exige validación Módulo-11 exacta; el regex asegura cobertura aunque el STT transcriba variantes |
-| **`min_likelihood=POSSIBLE`** | `LIKELY` (anterior) | `LIKELY` fallaba en transcripciones con contexto léxico ambiguo |
-| **`speech_contexts` con boost=15** | Sin contexto adicional | Reduce transcripción errada de "RUT" como "rot" o "root" |
-| **`@st.cache_data`** | Sin caché | Elimina latencia de cold start al listar GCS y BigQuery |
