@@ -57,29 +57,50 @@ Este MVP fue construido en **una tarde de trabajo** como demostración técnica 
 
 ## 🏗️ Arquitectura
 
-```
-[Audio .wav en GCS]
-     │
-     ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    CLOUD RUN (Streamlit)                         │
-│                                                                  │
-│  1. Referencia ──────► Cloud Storage (GCS)                      │
-│  2. Transcripción ───► Speech-to-Text V1                        │
-│                         modelo: telephony, es-CL, 16kHz         │
-│                         + Speaker Diarization (Agente/Cliente)  │
-│  3. Censura PII ─────► Cloud DLP                                │
-│                         CHILE_CDI_NUMBER, CHILE_RUT_CUSTOM*     │
-│                         CREDIT_CARD, EMAIL, PHONE               │
-│                         (* detector regex propio)               │
-│  4. Insights ────────► Vertex AI / Gemini 2.5 Flash             │
-│                         (intención, sentimiento, churn, resumen)│
-│  5. Persistencia ────► BigQuery (particionado por mes)          │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    %% Acciones Externas
+    User((Usuario))
+    CF[Cloud Function: Gen Audio]
+    
+    subgraph "Google Cloud Platform (Infraestructura vía Terraform)"
+        
+        %% Aplicación Core
+        subgraph "Computación y Hosting"
+            CR[Cloud Run: App Streamlit]
+            AR[Artifact Registry: Docker Image]
+        end
 
-Auth: Workload Identity Federation (sin archivos JSON)
-IAM:  Service Account con roles mínimos necesarios
-IaC:  Terraform (GCS, BQ, Artifact Registry, SA, Cloud Run)
+        %% Almacenamiento
+        subgraph "Datos y Multimedia"
+            GCS[(Cloud Storage: .wav)]
+            BQ[(BigQuery: Analytics)]
+        end
+
+        %% Pipeline de Inteligencia
+        subgraph "Servicios de IA y Seguridad"
+            STT[Speech-to-Text V1: es-CL]
+            DLP[Cloud DLP: PII Redaction]
+            Vertex[Vertex AI: Gemini 2.5 Flash]
+        end
+
+        %% Seguridad
+        IAM[IAM & Workload Identity]
+    end
+
+    %% Relaciones y Flujo
+    User -->|Consulta| CR
+    CF -->|Sintetiza y Sube| GCS
+    CR -->|1. Referencia| GCS
+    CR -->|2. Transcribe| STT
+    STT -->|3. Enmascara| DLP
+    DLP -->|4. Procesa| Vertex
+    Vertex -->|5. Almacena| BQ
+    
+    %% Soporte
+    AR -.->|Deploy| CR
+    IAM -.->|Permisos Mínimos| CR
+    IAM -.->|Permisos Mínimos| CF
 ```
 
 **Servicios GCP utilizados:**
