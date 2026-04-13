@@ -1,26 +1,80 @@
 # 🎙️ Speech Analytics — Banca GCP
 
-Pipeline completo de análisis de llamadas bancarias sobre Google Cloud Platform. Extrae insights de negocio seguros (PII enmascarada) desde grabaciones de voz, usando IA generativa y almacenamiento en BigQuery. Construido como MVP técnico para demostrar capacidades como Ingeniero de IA y Cloud.
+> **Contexto:** Este proyecto es una demostración técnica desarrollada para una postulación al cargo de **Ingeniero de IA**, en una iniciativa donde el equipo procesa grabaciones de llamadas de call centers para extraer analítica de negocio y almacenarla en BigQuery, utilizando exclusivamente los servicios nativos de **Google Cloud Platform**.
+
+---
+
+## 🎯 ¿De qué trata este proyecto?
+
+Los call centers bancarios generan cientos de grabaciones de voz al día. Analizar esas llamadas manualmente es inviable: consume tiempo, es costoso y no escala. Este proyecto demuestra cómo **automatizar completamente ese proceso** con inteligencia artificial en la nube.
+
+### El problema que resuelve
+
+> Un supervisor de calidad necesita saber: ¿Qué quería el cliente? ¿Cómo quedó su experiencia? ¿Está en riesgo de abandonar el banco? ¿Se expusieron datos sensibles durante la llamada?
+
+Responder esas preguntas manualmente para 500 llamadas diarias es imposible. Esta solución lo hace **en menos de 30 segundos por llamada**, de forma completamente automatizada.
+
+### La solución: un pipeline de IA end-to-end
+
+El sistema toma un archivo de audio `.wav` y ejecuta una cadena de 5 servicios GCP en secuencia:
+
+```
+Audio  →  Transcripción  →  Censura PII  →  Insights IA  →  BigQuery  →  Dashboard
+```
+
+1. **Transcripción automática** con separación de voces (¿quién dijo qué? Agente vs Cliente)
+2. **Enmascaramiento de datos sensibles**: RUTs, tarjetas de crédito y correos son censurados antes de salir del pipeline
+3. **Análisis semántico con Gemini**: el modelo LLM extrae intención, sentimiento, riesgo de churn y un resumen estructurado
+4. **Persistencia en BigQuery**: cada llamada queda registrada con sus métricas, lista para explotación con herramientas BI
+5. **Dashboard interactivo en Streamlit** desplegado en Cloud Run: permite seleccionar, reproducir y analizar cualquier llamada en tiempo real
+
+### ¿Qué habilidades demuestra este proyecto?
+
+| Área | Habilidades demostradas |
+|---|---|
+| **Python** | Arquitectura modular, manejo de APIs, procesamiento de audio, control de errores robusto |
+| **IA / LLM** | Integración con Vertex AI (Gemini 2.5 Flash), prompt engineering, parsing de JSON estructurado |
+| **GCP** | Cloud Run, Speech-to-Text V1, Cloud DLP, BigQuery, Cloud Storage, Cloud Functions, Artifact Registry |
+| **Seguridad de datos** | Enmascaramiento de PII con detectores nativos + regex personalizado para RUT chileno |
+| **Infraestructura como Código** | Terraform para aprovisionar todos los recursos GCP desde cero |
+| **Frontend** | Streamlit con diseño moderno, dark mode, chat bubbles por hablante y visualización de hallazgos PII |
+
+
+### ⏱️ Alcance y honestidad técnica
+
+Este MVP fue construido en **una tarde de trabajo** como demostración técnica rápida. El objetivo fue demostrar la capacidad de integrar múltiples servicios de GCP en un pipeline funcional end-to-end partiendo desde cero, sin plantillas ni boilerplates previos.
+
+**El sistema funciona y es demostrable**, pero como todo MVP tiene espacio claro para escalar y optimizar:
+
+- **Procesamiento en lote**: actualmente procesa un audio a la vez; podría extenderse con Pub/Sub + Cloud Run Jobs para procesar cientos de llamadas en paralelo de forma asíncrona.
+- **Webhooks en tiempo real**: en lugar de subir un `.wav` manualmente, conectar directamente con la plataforma telefónica usando SIPREC o similares.
+- **Dashboard BI**: los datos ya están en BigQuery listos para conectar con Looker Studio o Grafana para visualizaciones ejecutivas.
+- **Modelos de detección de PII**: el regex actual cubre el formato estándar del RUT chileno; podría entrenarse un modelo custom con AutoML para mayor cobertura.
+- **Evaluación de calidad**: agregar métricas de adherencia al protocolo del agente (¿saludó correctamente? ¿ofreció solución alternativa?) usando prompts más detallados en Gemini.
+- **Autenticación**: el demo es público (`--allow-unauthenticated`); en producción se conectaría con IAP o un proveedor de identidad corporativo.
 
 ---
 
 ## 🏗️ Arquitectura
 
 ```
-[Audio .wav]
+[Audio .wav en GCS]
      │
      ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                    CLOUD RUN (Streamlit)                         │
 │                                                                  │
-│  1. Upload ──────────► Cloud Storage (GCS)                      │
-│  2. Transcribe ──────► Speech-to-Text v2 (chirp, es-CL)        │
+│  1. Referencia ──────► Cloud Storage (GCS)                      │
+│  2. Transcripción ───► Speech-to-Text V1                        │
+│                         modelo: telephony, es-CL, 16kHz         │
 │                         + Speaker Diarization (Agente/Cliente)  │
-│  3. Redact PII ──────► Cloud DLP                                │
-│                         (CHILE_RUT, CREDIT_CARD, EMAIL, PHONE)  │
-│  4. Extract Insights ► Vertex AI / Gemini 1.5 Flash             │
+│  3. Censura PII ─────► Cloud DLP                                │
+│                         CHILE_CDI_NUMBER, CHILE_RUT_CUSTOM*     │
+│                         CREDIT_CARD, EMAIL, PHONE               │
+│                         (* detector regex propio)               │
+│  4. Insights ────────► Vertex AI / Gemini 2.5 Flash             │
 │                         (intención, sentimiento, churn, resumen)│
-│  5. Store ───────────► BigQuery (particionado por mes)          │
+│  5. Persistencia ────► BigQuery (particionado por mes)          │
 └─────────────────────────────────────────────────────────────────┘
 
 Auth: Workload Identity Federation (sin archivos JSON)
@@ -33,13 +87,13 @@ IaC:  Terraform (GCS, BQ, Artifact Registry, SA, Cloud Run)
 | Servicio | Rol en el proyecto |
 |---|---|
 | **Cloud Run** | Hosting de la app Streamlit (contenedor Docker) |
-| **Cloud Storage** | Almacenamiento temporal de archivos de audio |
-| **Speech-to-Text v2** | Transcripción con diarización de hablantes en es-CL |
-| **Cloud DLP** | Detección y enmascaramiento de PII (RUT, tarjeta, email) |
-| **Vertex AI (Gemini)** | Extracción de intención, sentimiento, churn y resumen |
+| **Cloud Storage** | Repositorio de archivos de audio `.wav` |
+| **Speech-to-Text V1** | Transcripción con diarización de hablantes en `es-CL` |
+| **Cloud DLP** | Detección y enmascaramiento de PII con regex customizado para RUT chileno |
+| **Vertex AI (Gemini 2.5 Flash)** | Extracción de intención, sentimiento, churn y resumen |
 | **BigQuery** | Almacén analítico particionado por mes |
 | **Artifact Registry** | Repositorio Docker para la imagen del servicio |
-| **Workload Identity** | Autenticación segura sin claves JSON |
+| **Cloud Functions** | Generación serverless de los 5 audios de muestra |
 
 ---
 
@@ -50,19 +104,19 @@ Tabla: `call_analytics_dataset.call_transcriptions` (particionada por mes en `cr
 | Columna | Tipo | Descripción |
 |---|---|---|
 | `call_id` | STRING (REQUIRED) | UUID único generado por el pipeline |
-| `timestamp` | TIMESTAMP (REQUIRED) | Momento simulado de la llamada |
+| `timestamp` | TIMESTAMP (REQUIRED) | Momento de procesamiento |
 | `audio_filename` | STRING | Nombre del archivo de audio procesado |
 | `transcript_redacted` | STRING | Transcripción completa con PII enmascarada |
 | `call_intent` | STRING | Intención detectada por Gemini |
 | `customer_sentiment` | STRING | Positivo, Neutro o Negativo |
 | `churn_risk` | BOOL | Riesgo de abandono detectado |
 | `summary` | STRING | Resumen de 2-3 oraciones generado por Gemini |
-| `processing_duration_seconds` | FLOAT | Duración total del pipeline en segundos |
+| `processing_duration_seconds` | FLOAT | Duración total del pipeline |
 | `speech_confidence_score` | FLOAT | Score de confianza STT (0.0–1.0) |
 | `dlp_findings_count` | INTEGER | Cantidad de hallazgos PII censurados |
-| `gemini_model_used` | STRING | Modelo Gemini utilizado (ej: gemini-1.5-flash) |
+| `gemini_model_used` | STRING | Modelo Gemini utilizado |
 | `pipeline_status` | STRING | SUCCESS o PARTIAL_FAILURE |
-| `created_at` | TIMESTAMP (REQUIRED) | Timestamp de inserción (campo de particionamiento) |
+| `created_at` | TIMESTAMP (REQUIRED) | Timestamp de inserción (campo de partición) |
 | `updated_at` | TIMESTAMP | Timestamp de última actualización |
 
 ---
@@ -126,34 +180,30 @@ terraform apply -var="project_id=gcp-speech-analytics"
 ### 4. Generar Audios de Muestra
 
 > [!NOTE]
-> **Nota para Cloud Shell:** Si usas Cloud Shell, es posible que la API de Text-to-Speech requiera configurar un proyecto de cuota para las credenciales locales de ADC. Si obtienes un error `403` al intentar `Opción A`, procede directamente con `Opción B`.
+> **Opción recomendada (Cloud Function):** Al ejecutar Terraform, se provisionó automáticamente una Cloud Function serverless. Solo invoca su URL para depositar los 5 `.wav` directamente en tu bucket.
 
-**Opción A: Ejecución Local**
-```bash
-# Requiere autenticación GCP activa
-python sample_audios/generate_sample_audios.py
-```
-Los 5 archivos `.wav` quedarán en `sample_audios/`. Están excluidos del git por el `.gitignore`.
-
-**Opción B: Uso de Cloud Function (Recomendado)**
-Al ejecutar Terraform en el Paso 3, se provisionó automáticamente una **Cloud Function Serverless** que invoca nuestro generador. Solo debes golpear la URL pública que arrojó Terraform en sus outputs (`cloud_function_url`) para depositar instantáneamente los 5 `.wav` en tu Storage, saltando las restricciones locales.
 ```bash
 cd terraform
 curl $(terraform output -raw cloud_function_url)
 cd ..
 ```
 
+**Opción alternativa (local):**
+```bash
+python sample_audios/generate_sample_audios.py
+```
+
 ### 5. Ejecutar Localmente
 
-> [!TIP]
-> La aplicación web lee automáticamente los archivos `.wav` disponibles en tu bucket GCS.
-
 ```bash
-export GCP_PROJECT_ID=gcp-speech-analytics
-export GCS_BUCKET_NAME=speech-analytics-gcp-speech-analytics
+# Requeridas (sin valor por defecto)
+export GCP_PROJECT_ID=<tu-proyecto>
+export GCS_BUCKET_NAME=<tu-bucket>
+
+# Opcionales (usan defaults seguros)
 export BQ_DATASET_ID=call_analytics_dataset
 export BQ_TABLE_ID=call_transcriptions
-export GEMINI_MODEL=gemini-1.5-flash
+export GEMINI_MODEL=gemini-2.5-flash
 
 cd src
 streamlit run app.py
@@ -162,14 +212,17 @@ streamlit run app.py
 
 ### 6. Build y Push de la Imagen Docker
 
-Asegúrate de ejecutar estos comandos desde la **raíz del proyecto**, no desde adentro de la carpeta `src` ni `terraform`:
+> [!IMPORTANT]
+> Ejecuta desde la **raíz del proyecto**, no desde `src/` ni `terraform/`.
 
 ```bash
 # Configurar Docker para Artifact Registry
 gcloud auth configure-docker us-central1-docker.pkg.dev
 
-# Build (el punto . al final y el uso de -f indica que tome todo el contexto de la raíz)
-docker build -t us-central1-docker.pkg.dev/gcp-speech-analytics/speech-analytics-repo/speech-analytics-app:latest -f src/Dockerfile .
+# Build (forzar sin caché para asegurar últimos cambios)
+docker build --no-cache \
+  -t us-central1-docker.pkg.dev/gcp-speech-analytics/speech-analytics-repo/speech-analytics-app:latest \
+  -f src/Dockerfile .
 
 # Push
 docker push us-central1-docker.pkg.dev/gcp-speech-analytics/speech-analytics-repo/speech-analytics-app:latest
@@ -184,7 +237,7 @@ gcloud run deploy speech-analytics-app \
   --platform managed \
   --allow-unauthenticated \
   --service-account speech-analytics-sa@gcp-speech-analytics.iam.gserviceaccount.com \
-  --set-env-vars GCP_PROJECT_ID=gcp-speech-analytics,GCS_BUCKET_NAME=speech-analytics-gcp-speech-analytics,BQ_DATASET_ID=call_analytics_dataset,BQ_TABLE_ID=call_transcriptions,GEMINI_MODEL=gemini-1.5-flash \
+  --set-env-vars GCP_PROJECT_ID=gcp-speech-analytics,GCS_BUCKET_NAME=speech-analytics-gcp-speech-analytics,BQ_DATASET_ID=call_analytics_dataset,BQ_TABLE_ID=call_transcriptions,GEMINI_MODEL=gemini-2.5-flash \
   --memory 2Gi \
   --cpu 2 \
   --port 8080
@@ -194,13 +247,13 @@ gcloud run deploy speech-analytics-app \
 
 ## 🔧 Variables de Entorno
 
-| Variable | Descripción | Ejemplo |
+| Variable | Descripción | Valor por defecto |
 |---|---|---|
 | `GCP_PROJECT_ID` | ID del proyecto GCP | `gcp-speech-analytics` |
-| `GCS_BUCKET_NAME` | Nombre del bucket GCS para audios | `speech-analytics-gcp-speech-analytics` |
+| `GCS_BUCKET_NAME` | Bucket GCS para audios | `speech-analytics-gcp-speech-analytics` |
 | `BQ_DATASET_ID` | Dataset de BigQuery | `call_analytics_dataset` |
 | `BQ_TABLE_ID` | Tabla de BigQuery | `call_transcriptions` |
-| `GEMINI_MODEL` | Modelo Gemini a utilizar | `gemini-1.5-flash` |
+| `GEMINI_MODEL` | Modelo Gemini a utilizar | `gemini-2.5-flash` |
 
 ---
 
@@ -209,15 +262,17 @@ gcloud run deploy speech-analytics-app \
 ```
 /
 ├── terraform/
-│   ├── main.tf          # GCS, BQ, Artifact Registry, SA, IAM, Cloud Run
+│   ├── main.tf          # GCS, BQ, Artifact Registry, SA, IAM, Cloud Run, Cloud Function
 │   └── variables.tf     # Variables con defaults
 ├── src/
-│   ├── app.py           # Interfaz Streamlit (lee audios dinámicamente desde GCS)
-│   ├── gcp_services.py  # Upload GCS, STT v2, DLP, Gemini
-│   ├── bq_client.py     # Insert y truncate BigQuery
-│   └── Dockerfile       # Imagen python:3.10-slim
+│   ├── app.py           # Interfaz Streamlit con introducción, transcripción censurable y panel de insights
+│   ├── gcp_services.py  # STT V1 (telephony/es-CL), DLP (regex RUT), Gemini 2.5 Flash
+│   ├── bq_client.py     # Insert y consulta Top 10 en BigQuery
+│   └── Dockerfile       # Imagen python:3.10-slim, puerto 8080
+├── cloud_function/
+│   └── main.py          # Cloud Function: genera 5 audios TTS y los sube a GCS
 ├── sample_audios/
-│   └── generate_sample_audios.py  # TTS: 5 escenarios bancarios es-CL
+│   └── generate_sample_audios.py  # Script local alternativo (TTS 5 escenarios bancarios)
 ├── .gitignore
 ├── README.md
 └── requirements.txt
@@ -225,30 +280,25 @@ gcloud run deploy speech-analytics-app \
 
 ---
 
-## 🏷️ Historial de Commits
-
-```
-1. chore: initial project structure and .gitignore
-2. infra: add terraform for GCS, BQ, Artifact Registry, IAM and Workload Identity
-3. chore: add Dockerfile and requirements.txt
-4. feat(sample_audios): add TTS script to generate 5 banking call samples in es-CL
-5. feat(bq_client): implement BigQuery insert and truncate module
-6. feat(gcp_services): implement Speech-to-Text v2 with speaker diarization
-7. feat(gcp_services): add DLP redaction pipeline for CHILE_RUT, CREDIT_CARD and EMAIL
-8. feat(gcp_services): add Vertex AI insight extraction with Gemini
-9. feat(app): build Streamlit UI with session state and progress tracking
-10. docs: complete README with architecture and deployment guide
-11. feat(app): read audios dynamically from GCS and update TTS to es-US Neural2
-```
-
----
-
 ## 🎯 Escenarios de Llamadas de Muestra
 
-| Archivo | Escenario | Sentimiento | Churn Risk |
+| Archivo | Escenario | Sentimiento Esperado | Churn Risk |
 |---|---|---|---|
 | `Llamada_01_ReclamoFraude.wav` | Cliente reporta cargo no reconocido | Negativo | ✅ Sí |
 | `Llamada_02_ConsultaSaldo.wav` | Consulta de saldo y cartola | Neutro | ❌ No |
 | `Llamada_03_SolicitudPrestamo.wav` | Solicitud de crédito de consumo | Positivo | ❌ No |
 | `Llamada_04_BloqueoTarjeta.wav` | Bloqueo urgente por robo | Negativo | ❌ No |
 | `Llamada_05_CancelacionCuenta.wav` | Cierre de cuenta por comisiones | Negativo | ✅ Sí |
+
+---
+
+## 🔍 Decisiones Técnicas Clave
+
+| Decisión | Alternativa descartada | Razón |
+|---|---|---|
+| **STT V1** (`long_running_recognize`) | STT V2 con recognizer custom | V1 es más estable para diarización sin configuración de recursos regionales |
+| **Gemini 2.5 Flash** | gemini-1.5-flash | Versión estable con mejor rendimiento y menor latencia |
+| **DLP + regex propio** (`CHILE_RUT_CUSTOM`) | Solo `CHILE_CDI_NUMBER` nativo | DLP nativo exige validación Módulo-11 exacta; el regex asegura cobertura aunque el STT transcriba variantes |
+| **`min_likelihood=POSSIBLE`** | `LIKELY` (anterior) | `LIKELY` fallaba en transcripciones con contexto léxico ambiguo |
+| **`speech_contexts` con boost=15** | Sin contexto adicional | Reduce transcripción errada de "RUT" como "rot" o "root" |
+| **`@st.cache_data`** | Sin caché | Elimina latencia de cold start al listar GCS y BigQuery |
