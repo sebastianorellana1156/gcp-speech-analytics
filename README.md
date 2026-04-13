@@ -6,9 +6,10 @@
 
 ## 🚀 Live Demo
 ### [**ACCEDER A LA APLICACIÓN EN VIVO**](https://speech-analytics-app-220670024513.us-central1.run.app/)
+https://speech-analytics-app-220670024513.us-central1.run.app/
 
 > [!NOTE]
-> La aplicación está desplegada de forma estable en **Google Cloud Run** para visualización directa de los resultados del pipeline.
+> La aplicación está desplegada de forma estable en **Google Cloud Run** hasta el 19 de abril para visualización directa de los resultados del pipeline.
 
 ---
 ## 🎯 ¿De qué trata este proyecto?
