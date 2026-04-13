@@ -61,46 +61,52 @@ Este MVP fue construido en **una tarde de trabajo** como demostración técnica 
 graph TD
     %% Acciones Externas
     User((Usuario))
-    CF[Cloud Function: Gen Audio]
-    
+
     subgraph "Google Cloud Platform (Infraestructura vía Terraform)"
-        
-        %% Aplicación Core
-        subgraph "Computación y Hosting"
-            CR[Cloud Run: App Streamlit]
+
+        %% Capa de Soporte (Top)
+        subgraph "Gestión y Seguridad"
+            IAM[IAM & Workload Identity]
             AR[Artifact Registry: Docker Image]
         end
 
-        %% Almacenamiento
-        subgraph "Datos y Multimedia"
-            GCS[(Cloud Storage: .wav)]
-            BQ[(BigQuery: Analytics)]
+        %% Capa de Ejecución (Middle)
+        subgraph "Computación y Hosting"
+            CR[Cloud Run: App Streamlit]
+            CF[Cloud Function: Gen Audio]
         end
 
-        %% Pipeline de Inteligencia
+        %% Capa de Inteligencia (Bottom-Left)
         subgraph "Servicios de IA y Seguridad"
             STT[Speech-to-Text V1: es-CL]
             DLP[Cloud DLP: PII Redaction]
             Vertex[Vertex AI: Gemini 2.5 Flash]
         end
 
-        %% Seguridad
-        IAM[IAM & Workload Identity]
+        %% Capa de Almacenamiento (Bottom-Right)
+        subgraph "Datos y Multimedia"
+            GCS[(Cloud Storage: .wav)]
+            BQ[(BigQuery: Analytics)]
+        end
     end
 
-    %% Relaciones y Flujo
+    %% Relaciones de Soporte y Permisos (Líneas punteadas)
+    AR -.->|Deploy| CR
+    IAM -.->|Permisos Mínimos| CR
+    IAM -.->|Permisos Mínimos| CF
+
+    %% Interacción del Usuario
     User -->|Consulta| CR
+
+    %% Relaciones y Flujo de Datos
     CF -->|Sintetiza y Sube| GCS
     CR -->|1. Referencia| GCS
+    
+    %% Pipeline de IA
     CR -->|2. Transcribe| STT
     STT -->|3. Enmascara| DLP
     DLP -->|4. Procesa| Vertex
     Vertex -->|5. Almacena| BQ
-    
-    %% Soporte
-    AR -.->|Deploy| CR
-    IAM -.->|Permisos Mínimos| CR
-    IAM -.->|Permisos Mínimos| CF
 ```
 
 **Servicios GCP utilizados:**
