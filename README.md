@@ -4,6 +4,13 @@
 
 ---
 
+## 🚀 Live Demo
+### [**ACCEDER A LA APLICACIÓN EN VIVO**](https://speech-analytics-app-220670024513.us-central1.run.app/)
+
+> [!NOTE]
+> La aplicación está desplegada de forma estable en **Google Cloud Run** para visualización directa de los resultados del pipeline.
+
+---
 ## 🎯 ¿De qué trata este proyecto?
 
 Los call centers bancarios generan cientos de grabaciones de voz al día. Analizar esas llamadas manualmente es inviable: consume tiempo, es costoso y no escala. Este proyecto demuestra cómo **automatizar completamente ese proceso** con inteligencia artificial en la nube.
