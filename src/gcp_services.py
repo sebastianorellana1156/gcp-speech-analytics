@@ -5,7 +5,7 @@ Provee las siguientes funciones del pipeline de procesamiento de llamadas:
   - upload_audio_to_gcs: Sube audio a Cloud Storage
   - transcribe_audio: Transcribe con Speech-to-Text v2 y diarización
   - redact_pii: Enmascara PII con Cloud DLP
-  - extract_insights: Extrae métricas de negocio con Vertex AI / Gemini
+  - extract_insights: Extrae métricas de negocio con Vertex AI / Gemini 
 
 Todas las funciones incluyen manejo de errores con mensajes descriptivos.
 """
@@ -15,8 +15,7 @@ import os
 import re
 
 from google.cloud import storage
-from google.cloud import speech_v2
-from google.cloud.speech_v2.types import cloud_speech
+from google.cloud import speech
 from google.cloud import dlp_v2
 import vertexai
 from vertexai.generative_models import GenerativeModel
@@ -83,91 +82,101 @@ def get_audio_bytes_from_gcs(bucket_name: str, blob_name: str) -> bytes:
 
 
 # ---------------------------------------------------------------------------
-# 2. Transcripción con Speech-to-Text v2
+# 2. Transcripción con Speech-to-Text v1 (Estable para MVPs)
 # ---------------------------------------------------------------------------
 def transcribe_audio(gcs_uri: str, project_id: str) -> dict:
     """
-    Transcribe un archivo de audio desde GCS usando Cloud Speech-to-Text v2.
-
-    Utiliza el modelo 'chirp' con fallback a 'latest_long'. Habilita diarización
-    de hablante para identificar agente (Speaker 1) y cliente (Speaker 2).
-
-    Args:
-        gcs_uri: URI del archivo de audio en GCS (gs://bucket/file.wav).
-        project_id: ID del proyecto GCP.
-
-    Returns:
-        Diccionario con:
-            - segments (list): Lista de dicts {speaker: str, text: str}
-              donde speaker es 'Agente' o 'Cliente'.
-            - confidence_score (float): Promedio de confidence scores (0.0–1.0).
-
-    Raises:
-        RuntimeError: Si la transcripción falla o retorna resultado vacío.
+    Transcribe un archivo de audio desde GCS usando Cloud Speech-to-Text V1.
+    Habilita diarización nativa para identificar Agente y Cliente.
     """
     try:
-        client = speech_v2.SpeechClient()
-        recognizer_name = f"projects/{project_id}/locations/global/recognizers/_"
+        print(f"⏳ Iniciando transcripción V1 para: {gcs_uri}")
+        client = speech.SpeechClient()
+        audio = speech.RecognitionAudio(uri=gcs_uri)
 
-        config = cloud_speech.RecognitionConfig(
-            auto_decoding_config=cloud_speech.AutoDetectDecodingConfig(),
-            language_codes=["es-CL"],
-            model="chirp",
-            features=cloud_speech.RecognitionFeatures(
-                enable_word_time_offsets=True,
-                diarization_config=cloud_speech.SpeakerDiarizationConfig(
-                    min_speaker_count=2,
-                    max_speaker_count=2,
-                ),
+        # Configuración V1 optimizada con contextos extraídos de los diálogos
+        config = speech.RecognitionConfig(
+            language_code="es-CL",
+            model="telephony",
+            sample_rate_hertz=16000,
+            enable_automatic_punctuation=True,
+            enable_word_time_offsets=True,
+            speech_contexts=[
+                speech.SpeechContext(
+                    phrases=[
+                        # Términos críticos para DLP
+                        "su RUT", "mi RUT es", "RUT", "email es", "correo es", "arroba", "punto com", "dígitos",
+                        # Vocabulario bancario
+                        "cartola", "movimientos", "saldo disponible", "crédito de consumo", 
+                        "tasa de interés", "seguro de desgravamen", "sucursal", "comisiones", 
+                        "comisión de mantención", "bloquear mi tarjeta", "cuenta corriente",
+                        "fraude", "área de fraudes", "transferencia", "ejecutivo de crédito",
+                        # Nombres propios
+                        "Banco Andino", "Carlos", "Sofía", "Rodrigo", "Daniela", "Miguel",
+                        # Frases comunes
+                        "¿en qué le puedo ayudar?", "¿en qué le puedo orientar?", 
+                        "verificar su identidad", "cinco días hábiles", "forma remota"
+                    ],
+                    boost=15.0  
+                )
+            ],
+            diarization_config=speech.SpeakerDiarizationConfig(
+                enable_speaker_diarization=True,
+                min_speaker_count=2,
+                max_speaker_count=2,
             ),
         )
 
-        request = cloud_speech.RecognizeRequest(
-            recognizer=recognizer_name,
-            config=config,
-            uri=gcs_uri,
-        )
-
-        response = client.recognize(request=request)
+        # Usamos long_running_recognize por si el audio supera el minuto de duración
+        operation = client.long_running_recognize(config=config, audio=audio)
+        
+        print("⏳ Procesando el audio en la nube... (Esto puede tardar unos segundos)")
+        response = operation.result(timeout=600) # Espera hasta 10 min
 
         if not response.results:
-            raise RuntimeError("Speech-to-Text retornó resultado vacío.")
+            raise RuntimeError("Speech-to-Text V1 retornó resultado vacío.")
 
-        # Extraer palabras con info de speaker del último resultado (más completo)
         all_words = []
         confidence_scores = []
 
+        # 1. Extraer el nivel de confianza general
         for result in response.results:
             if result.alternatives:
                 alt = result.alternatives[0]
                 confidence_scores.append(alt.confidence if alt.confidence else 0.0)
-                for word in alt.words:
-                    all_words.append({
-                        "word": word.word,
-                        "speaker_tag": word.speaker_label if hasattr(word, "speaker_label") else str(word.speaker_tag),
-                    })
+                
+        # 2. En V1, los tags de diarización vienen agrupados en el ÚLTIMO resultado
+        last_result = response.results[-1]
+        if last_result.alternatives:
+            for word_info in last_result.alternatives[0].words:
+                palabra_limpia = word_info.word
+                
+                # Forzar corrección manual de "rot" o "root" a "RUT"
+                if palabra_limpia.lower().replace(".", "").replace(",", "") in ["rot", "root"]:
+                    palabra_limpia = "RUT"
+
+                all_words.append({
+                    "word": palabra_limpia,
+                    "speaker_tag": str(word_info.speaker_tag),
+                })
 
         if not all_words:
-            raise RuntimeError("No se encontraron palabras en la transcripción.")
+            raise RuntimeError("No se detectaron palabras o hablantes en la transcripción.")
 
-        # Agrupar palabras consecutivas del mismo hablante en segmentos
+        # Reutilizamos tu excelente función para agrupar los segmentos
         segments = _group_words_into_segments(all_words)
+        
+        avg_confidence = sum(confidence_scores) / len(confidence_scores) if confidence_scores else 0.0
 
-        # El primer hablante detectado se asume como Agente
-        avg_confidence = (
-            sum(confidence_scores) / len(confidence_scores)
-            if confidence_scores else 0.0
-        )
+        print(f"✅ Transcripción completada. Confianza promedio: {avg_confidence:.2f}")
 
         return {
             "segments": segments,
             "confidence_score": round(avg_confidence, 4),
         }
 
-    except RuntimeError:
-        raise
     except Exception as e:
-        raise RuntimeError(f"Error en Speech-to-Text para {gcs_uri}: {e}") from e
+        raise RuntimeError(f"Error en Speech-to-Text V1 para {gcs_uri}: {e}") from e
 
 
 def _group_words_into_segments(words: list[dict]) -> list[dict]:
@@ -245,33 +254,43 @@ def redact_pii(text: str, project_id: str) -> dict:
     Raises:
         RuntimeError: Si la llamada a DLP falla.
     """
-    # Mapeo de info type → token descriptivo en español
     REPLACEMENT_MAP = {
-        "CHILE_RUT":          "[CHILE_RUT_CENSURADO]",
+        "CHILE_CDI_NUMBER":   "[RUT_CENSURADO]",
         "CREDIT_CARD_NUMBER": "[TARJETA_CENSURADA]",
         "EMAIL_ADDRESS":      "[EMAIL_CENSURADO]",
         "PHONE_NUMBER":       "[TELEFONO_CENSURADO]",
+        "CHILE_RUT_CUSTOM":   "[RUT_CENSURADO]",  # detector propio
     }
 
     try:
         dlp_client = dlp_v2.DlpServiceClient()
         parent = f"projects/{project_id}/locations/global"
 
-        info_types = [
-            dlp_v2.InfoType(name=info_type)
-            for info_type in REPLACEMENT_MAP.keys()
+        # ── Info types nativos de GCP ──────────────────────────────────────
+        native_info_types = [
+            dlp_v2.InfoType(name=name)
+            for name in REPLACEMENT_MAP.keys()
+            if name != "CHILE_RUT_CUSTOM"
         ]
 
-        inspect_config = dlp_v2.InspectConfig(info_types=info_types)
+        # ── Detector personalizado con regex para RUT chileno ──────────────
+        # Cubre: 12.345.678-5 | 12345678-5 | 123456785
+        custom_rut_detector = dlp_v2.CustomInfoType(
+            info_type=dlp_v2.InfoType(name="CHILE_RUT_CUSTOM"),
+            regex=dlp_v2.CustomInfoType.Regex(
+                pattern=r"\b\d{1,2}[.\d]{0,9}\d-[\dkK]\b"
+            ),
+            likelihood=dlp_v2.Likelihood.VERY_LIKELY,  # forzamos confianza alta
+        )
 
-        # Construir transformaciones: una por cada info type
-        transformations = [
-            dlp_v2.PrimitiveTransformation(
-                replace_with_info_type_config=dlp_v2.ReplaceWithInfoTypeConfig()
-            )
-        ]
+        # ── FIX PRINCIPAL: bajar umbral a POSSIBLE ─────────────────────────
+        inspect_config = dlp_v2.InspectConfig(
+            info_types=native_info_types,
+            custom_info_types=[custom_rut_detector],
+            min_likelihood=dlp_v2.Likelihood.POSSIBLE,  # umbral mas permisivo
+            include_quote=True,
+        )
 
-        # Usamos deidentify para reemplazar con info type names
         deidentify_config = dlp_v2.DeidentifyConfig(
             info_type_transformations=dlp_v2.InfoTypeTransformations(
                 transformations=[
@@ -285,7 +304,6 @@ def redact_pii(text: str, project_id: str) -> dict:
         )
 
         item = dlp_v2.ContentItem(value=text)
-
         request = dlp_v2.DeidentifyContentRequest(
             parent=parent,
             deidentify_config=deidentify_config,
@@ -296,22 +314,31 @@ def redact_pii(text: str, project_id: str) -> dict:
         response = dlp_client.deidentify_content(request=request)
         redacted_text = response.item.value
 
-        # Reemplazar los tokens genéricos de DLP por nuestros tokens en español
+        # Reemplazar tokens genéricos de DLP → tokens en español
         for info_type, token in REPLACEMENT_MAP.items():
             redacted_text = redacted_text.replace(f"[{info_type}]", token)
 
-        # Contar hallazgos totales inspeccionando el texto original
+        # Contar hallazgos
         inspect_request = dlp_v2.InspectContentRequest(
             parent=parent,
             inspect_config=inspect_config,
             item=dlp_v2.ContentItem(value=text),
         )
         inspect_response = dlp_client.inspect_content(request=inspect_request)
-        findings_count = len(inspect_response.result.findings)
+        findings_list = inspect_response.result.findings
+        findings_count = len(findings_list)
+
+        findings_details = []
+        for f in findings_list:
+            findings_details.append({
+                "info_type": f.info_type.name,
+                "quote": f.quote
+            })
 
         return {
             "redacted_text": redacted_text,
             "findings_count": findings_count,
+            "findings_details": findings_details,
         }
 
     except Exception as e:
@@ -324,7 +351,7 @@ def redact_pii(text: str, project_id: str) -> dict:
 def extract_insights(
     transcript_redacted: str,
     project_id: str,
-    model: str = "gemini-1.5-flash",
+    model: str = "gemini-2.5-flash",
 ) -> dict:
     """
     Extrae métricas de negocio de una transcripción usando Vertex AI (Gemini).
@@ -336,7 +363,7 @@ def extract_insights(
     Args:
         transcript_redacted: Transcripción con PII ya enmascarada.
         project_id: ID del proyecto GCP.
-        model: Nombre del modelo Gemini a usar (default: gemini-1.5-flash).
+        model: Nombre del modelo Gemini a usar (default: gemini-2.5-flash).
 
     Returns:
         Diccionario con:
